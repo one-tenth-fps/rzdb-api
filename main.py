@@ -1,14 +1,13 @@
-import re
 import aioodbc
-
 import pyodbc
 import uvicorn
-import config
-from fastapi import FastAPI, HTTPException, Request, Response
+from fastapi import FastAPI, HTTPException, Query, Request, Response
 from fastapi.middleware.gzip import GZipMiddleware
 
+import config
+
 dbpool = None
-station_code_pattern = re.compile(r"(?:\d{1,6})")
+station_code_pattern = r"^(?:\d{1,6})$"
 
 app = FastAPI()
 app.add_middleware(GZipMiddleware, minimum_size=1000)
@@ -28,23 +27,12 @@ async def shutdown():
 
 @app.get("/getNearbyCars")
 async def getNearbyCars(
-    request: Request, apiKey: str = "", stationCode: str = "0", searchRadius: int = 100, requestId: str = ""
+    request: Request,
+    apiKey: str = "",
+    stationCode: str | None = Query(None, regex=station_code_pattern),
+    searchRadius: int | None = Query(100, le=config.CAR_SEARCH_RADIUS_LIMIT),
+    requestId: str | None = Query(None, max_length=config.REQUEST_ID_LENGTH_LIMIT),
 ):
-    if searchRadius > config.CAR_SEARCH_RADIUS_LIMIT:
-        raise HTTPException(
-            status_code=config.BAD_REQUEST_STATUS,
-            detail="searchRadius не должен превышать {0}".format(config.CAR_SEARCH_RADIUS_LIMIT),
-        )
-
-    if not station_code_pattern.fullmatch(stationCode):
-        raise HTTPException(status_code=config.BAD_REQUEST_STATUS, detail="stationCode должен быть числом из 1-6 цифр")
-
-    if len(requestId) > config.REQUEST_ID_LENGTH_LIMIT:
-        raise HTTPException(
-            status_code=config.BAD_REQUEST_STATUS,
-            detail="requestId не должен быть длиннее {0} символов".format(config.REQUEST_ID_LENGTH_LIMIT),
-        )
-
     async with dbpool.acquire() as db_conn:
         async with db_conn.cursor() as db_cursor:
             try:
@@ -63,8 +51,12 @@ async def getNearbyCars(
                     status_code=config.BAD_REQUEST_STATUS if db_response.IsError else config.OK_STATUS,
                 )
             except pyodbc.Error as e:
-                error_message = e.args[0] if len(e.args) == 1 else e.args[1]
-                raise HTTPException(status_code=config.BAD_REQUEST_STATUS, detail=error_message)
+                raise_on_pyodbc_error(e)
+
+
+def raise_on_pyodbc_error(exc: pyodbc.Error):
+    error_message = exc.args[0] if len(exc.args) == 1 else exc.args[1]
+    raise HTTPException(status_code=config.BAD_REQUEST_STATUS, detail=error_message)
 
 
 if __name__ == "__main__":
