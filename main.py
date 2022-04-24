@@ -1,10 +1,24 @@
+import logging
+import time
+
 import aioodbc
 import pyodbc
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request, Response
+from fastapi.exception_handlers import (http_exception_handler,
+                                        request_validation_exception_handler)
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 import config
+
+logging.basicConfig(
+    format="%(asctime)s %(levelname)s %(message)s",
+    level=logging.INFO,
+    filename="main.log",
+    encoding="utf-8",
+)
 
 dbpool = None
 station_code_pattern = r"^(?:\d{1,6})$"
@@ -71,7 +85,29 @@ async def getCarDocTurnover(
                 raise_on_pyodbc_error(e)
 
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.monotonic()
+    response = await call_next(request)
+    process_time = time.monotonic() - start_time
+    logging.info(f"{request.client.host} {request.method} {request.url} {process_time:.2f}ms {response.status_code}")
+    return response
+
+
+@app.exception_handler(StarletteHTTPException)
+async def custom_http_exception_handler(request, exc):
+    logging.error(f"{repr(exc)}")
+    return await http_exception_handler(request, exc)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    logging.error(f"{repr(exc)}")
+    return await request_validation_exception_handler(request, exc)
+
+
 def return_json(content: str, IsError: bool):
+    logging.info(f"{len(content)} bytes sent")
     return Response(
         content=content,
         media_type="application/json",
@@ -80,6 +116,7 @@ def return_json(content: str, IsError: bool):
 
 
 def raise_http_exception(detail: str):
+    logging.error(detail)
     raise HTTPException(status_code=config.BAD_REQUEST_STATUS, detail=detail)
 
 
