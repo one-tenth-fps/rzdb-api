@@ -1,4 +1,7 @@
+aioodbc==0.3.3
+connection==2021.7.20
 fastapi==0.75.2
 pyodbc==4.0.32
 PyYAML==6.0
+utils==1.0.1
 uvicorn==0.17.6
