@@ -9,7 +9,7 @@ import config
 dbpool = None
 station_code_pattern = r"^(?:\d{1,6})$"
 
-app = FastAPI()
+app = FastAPI(docs_url=None, redoc_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
@@ -28,8 +28,8 @@ async def shutdown():
 @app.get("/getNearbyCars")
 async def getNearbyCars(
     request: Request,
-    apiKey: str = "",
-    stationCode: str | None = Query(None, regex=station_code_pattern),
+    apiKey: str = Query(..., max_length=config.API_KEY_LENGTH_LIMIT),
+    stationCode: str = Query(..., regex=station_code_pattern),
     searchRadius: int | None = Query(100, le=config.CAR_SEARCH_RADIUS_LIMIT),
     requestId: str | None = Query(None, max_length=config.REQUEST_ID_LENGTH_LIMIT),
 ):
@@ -40,23 +40,52 @@ async def getNearbyCars(
                     "EXEC api.GetNearbyCars @StationCode=?, @Radius=?, @ApiKey=?, @RequestID=?, @ClientHost=?",
                     stationCode,
                     searchRadius,
-                    apiKey[:1000],
+                    apiKey,
                     requestId,
                     request.client.host,
                 )
                 db_response = await db_cursor.fetchone()
-                return Response(
-                    content=db_response.Result,
-                    media_type="application/json",
-                    status_code=config.BAD_REQUEST_STATUS if db_response.IsError else config.OK_STATUS,
-                )
+                return return_json(db_response.Result, db_response.IsError)
             except pyodbc.Error as e:
                 raise_on_pyodbc_error(e)
 
 
+@app.post("/getCarDocTurnover")
+async def getCarDocTurnover(
+    request: Request,
+    apiKey: str = Query(..., max_length=config.API_KEY_LENGTH_LIMIT),
+):
+    body = await request.body()
+    try:
+        body_str = body.decode()
+    except UnicodeDecodeError:
+        raise_http_exception("UTF-8 expected")
+
+    async with dbpool.acquire() as db_conn:
+        async with db_conn.cursor() as db_cursor:
+            try:
+                await db_cursor.execute("EXEC api.GetCarDocTurnover @RequestJSON=?, @ApiKey=?", body_str, apiKey)
+                db_response = await db_cursor.fetchone()
+                return return_json(db_response.Result, db_response.IsError)
+            except pyodbc.Error as e:
+                raise_on_pyodbc_error(e)
+
+
+def return_json(content: str, IsError: bool):
+    return Response(
+        content=content,
+        media_type="application/json",
+        status_code=config.BAD_REQUEST_STATUS if IsError else config.OK_STATUS,
+    )
+
+
+def raise_http_exception(detail: str):
+    raise HTTPException(status_code=config.BAD_REQUEST_STATUS, detail=detail)
+
+
 def raise_on_pyodbc_error(exc: pyodbc.Error):
     error_message = exc.args[0] if len(exc.args) == 1 else exc.args[1]
-    raise HTTPException(status_code=config.BAD_REQUEST_STATUS, detail=error_message)
+    raise_http_exception(error_message)
 
 
 if __name__ == "__main__":

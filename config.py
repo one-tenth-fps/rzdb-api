@@ -7,6 +7,7 @@ BAD_REQUEST_STATUS = config["app"]["ERROR_STATUS"]
 OK_STATUS = config["app"]["OK_STATUS"]
 CAR_SEARCH_RADIUS_LIMIT = config["app"]["CAR_SEARCH_RADIUS_LIMIT"]
 REQUEST_ID_LENGTH_LIMIT = config["app"]["REQUEST_ID_LENGTH_LIMIT"]
+API_KEY_LENGTH_LIMIT = config["app"]["API_KEY_LENGTH_LIMIT"]
 DEBUG = config["app"]["DEBUG"]
 
 DB_DRIVER = config["db"]["driver"]
