@@ -89,7 +89,7 @@ async def getCarDocTurnover(
 async def log_requests(request: Request, call_next):
     start_time = time.monotonic()
     response = await call_next(request)
-    process_time = time.monotonic() - start_time
+    process_time = (time.monotonic() - start_time)*1000
     logging.info(f"{request.client.host} {request.method} {request.url} {process_time:.2f}ms {response.status_code}")
     return response
 
