@@ -5,8 +5,7 @@ import aioodbc
 import pyodbc
 import uvicorn
 from fastapi import FastAPI, HTTPException, Query, Request, Response
-from fastapi.exception_handlers import (http_exception_handler,
-                                        request_validation_exception_handler)
+from fastapi.exception_handlers import http_exception_handler, request_validation_exception_handler
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.gzip import GZipMiddleware
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -47,21 +46,14 @@ async def getNearbyCars(
     searchRadius: int | None = Query(100, le=config.CAR_SEARCH_RADIUS_LIMIT),
     requestId: str | None = Query(None, max_length=config.REQUEST_ID_LENGTH_LIMIT),
 ):
-    async with dbpool.acquire() as db_conn:
-        async with db_conn.cursor() as db_cursor:
-            try:
-                await db_cursor.execute(
-                    "EXEC api.GetNearbyCars @StationCode=?, @Radius=?, @ApiKey=?, @RequestID=?, @ClientHost=?",
-                    stationCode,
-                    searchRadius,
-                    apiKey,
-                    requestId,
-                    request.client.host,
-                )
-                db_response = await db_cursor.fetchone()
-                return return_json(db_response.Result, db_response.IsError)
-            except pyodbc.Error as e:
-                raise_on_pyodbc_error(e)
+    return await db_exec(
+        "EXEC api.GetNearbyCars @StationCode=?, @Radius=?, @ApiKey=?, @RequestID=?, @ClientHost=?",
+        stationCode,
+        searchRadius,
+        apiKey,
+        requestId,
+        request.client.host,
+    )
 
 
 @app.post("/getCarDocTurnover")
@@ -75,21 +67,66 @@ async def getCarDocTurnover(
     except UnicodeDecodeError:
         raise_http_exception("UTF-8 expected")
 
-    async with dbpool.acquire() as db_conn:
-        async with db_conn.cursor() as db_cursor:
-            try:
-                await db_cursor.execute("EXEC api.GetCarDocTurnover @RequestJSON=?, @ApiKey=?", body_str, apiKey)
-                db_response = await db_cursor.fetchone()
-                return return_json(db_response.Result, db_response.IsError)
-            except pyodbc.Error as e:
-                raise_on_pyodbc_error(e)
+    return await db_exec(
+        "EXEC api.GetCarDocTurnover @RequestJSON=?, @ApiKey=?",
+        body_str,
+        apiKey,
+    )
+
+
+@app.get("/getCarPassport")
+async def getCarPassport(
+    request: Request,
+    apiKey: str = Query(..., max_length=config.API_KEY_LENGTH_LIMIT),
+    requestId: str | None = Query(None, max_length=config.REQUEST_ID_LENGTH_LIMIT),
+    carNumber: int = Query(...),
+):
+    return await db_exec(
+        "EXEC api.GetCarPassport @CarNumber=?, @ApiKey=?, @RequestID=?, @ClientHost=?",
+        carNumber,
+        apiKey,
+        requestId,
+        request.client.host,
+    )
+
+
+@app.get("/getCarRepairs")
+async def getCarRepairs(
+    request: Request,
+    apiKey: str = Query(..., max_length=config.API_KEY_LENGTH_LIMIT),
+    requestId: str | None = Query(None, max_length=config.REQUEST_ID_LENGTH_LIMIT),
+    carNumber: int = Query(...),
+):
+    return await db_exec(
+        "EXEC api.GetCarRepairs @CarNumber=?, @ApiKey=?, @RequestID=?, @ClientHost=?",
+        carNumber,
+        apiKey,
+        requestId,
+        request.client.host,
+    )
+
+
+@app.get("/getCarParts")
+async def getCarParts(
+    request: Request,
+    apiKey: str = Query(..., max_length=config.API_KEY_LENGTH_LIMIT),
+    requestId: str | None = Query(None, max_length=config.REQUEST_ID_LENGTH_LIMIT),
+    carNumber: int = Query(...),
+):
+    return await db_exec(
+        "EXEC api.GetCarParts @CarNumber=?, @ApiKey=?, @RequestID=?, @ClientHost=?",
+        carNumber,
+        apiKey,
+        requestId,
+        request.client.host,
+    )
 
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     start_time = time.monotonic()
     response = await call_next(request)
-    process_time = (time.monotonic() - start_time)*1000
+    process_time = (time.monotonic() - start_time) * 1000
     logging.info(f"{request.client.host} {request.method} {request.url} {process_time:.2f}ms {response.status_code}")
     return response
 
@@ -104,6 +141,20 @@ async def custom_http_exception_handler(request, exc):
 async def validation_exception_handler(request, exc):
     logging.error(f"{repr(exc)}")
     return await request_validation_exception_handler(request, exc)
+
+
+async def db_exec(query, *args):
+    async with dbpool.acquire() as db_conn:
+        async with db_conn.cursor() as db_cursor:
+            try:
+                await db_cursor.execute(query, *args)
+                db_response = await db_cursor.fetchone()
+                if db_response.Result is None:
+                    return return_json('{"detail":"empty"}', db_response.IsError)
+                else:
+                    return return_json(db_response.Result, db_response.IsError)
+            except pyodbc.Error as e:
+                raise_on_pyodbc_error(e)
 
 
 def return_json(content: str, IsError: bool):
